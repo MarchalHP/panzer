@@ -8,7 +8,7 @@ class BMP280:
         devices = self.i2c.scan()
         if self.address not in devices:
             print(f"BMP280 non trouvé! Appareils détectés: {devices}")
-        else: print("✅ BMP280 trouvé!")
+        else: print("BMP280 trouvé!")
         self._lire_calibration()
         self.i2c.writeto_mem(self.address, 0xF4, bytes([0x27]))
         self.i2c.writeto_mem(self.address, 0xF5, bytes([0xA0]))
