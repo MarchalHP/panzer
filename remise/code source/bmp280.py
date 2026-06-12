@@ -63,3 +63,4 @@ class BMP280:
         temp = self.lire_temperature()
         pression = self.lire_pression()
         return temp, pression
+

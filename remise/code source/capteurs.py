@@ -61,3 +61,4 @@ class HCSR04:
             return round(sum(mesures) / len(mesures), 1)
         else:
             return -1
+
