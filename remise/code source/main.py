@@ -85,10 +85,16 @@ PIN_IN2 = 12
 PIN_IN3 = 11
 PIN_IN4 = 10
 
+SWITCH_MOD_1 = 6
+SWITCH_MOD_2 = 7
+
 PIN_TRIG = 9
 PIN_ECHO = 8
-PIN_LED_VERTE = 14
-PIN_LED_ROUGE = 15
+PIN_LED_VERTE = 15
+PIN_LED_ROUGE = 14
+
+UART_TX = 4
+UART_RX = 5
 
 DISTANCE_DANGER    = 15
 DISTANCE_ATTENTION = 30
@@ -118,11 +124,17 @@ bmp = BMP280(i2c, address=119)
 moteurs = Moteurs(PIN_IN1, PIN_IN2, PIN_IN3, PIN_IN4)
 sonar = HCSR04(PIN_TRIG, PIN_ECHO)
 
+# config starting
+switch_mod_1 = machine.Pin(SWITCH_MOD_1, machine.Pin.IN, machine.Pin.PULL_UP)
+switch_mod_2 = machine.Pin(SWITCH_MOD_2, machine.Pin.IN, machine.Pin.PULL_UP)
+
 # Configuration des LEDs
 led_verte = machine.Pin(PIN_LED_VERTE, machine.Pin.OUT)
 led_rouge = machine.Pin(PIN_LED_ROUGE, machine.Pin.OUT)
 led_verte.value(0)
 led_rouge.value(0)
+
+bluetooth = machine.UART(1, baudrate=9600, tx=machine.Pin(UART_TX), rx=machine.Pin(UART_RX))
 
 print("\nTous les composants sont prêts!")
 print("Démarrage dans 3 secondes...\n")
@@ -183,6 +195,33 @@ def eviter_obstacle(distance):
     else:
         return "libre"
 
+# =========================================================================
+# FONCTIONS DE BLE
+# =========================================================================
+def lire_bluetooth():
+    if bluetooth.any():
+        donnees = bluetooth.read()
+        commande = donnees.decode("utf-8", errors="ignore")
+        commande = commande.strip()
+        if commande:
+            return commande
+    return None
+
+def envoyer_bluetooth(msg):
+    bluetooth.write(msg + "\n")
+
+def traiter_commande_remote(commande):
+    print(commande)
+    if commande == "Z":
+        moteurs.avancer
+    elif commande == "S":
+        moteurs.reculer
+    elif commande == "Q":
+        moteurs.tourner_gauche
+    elif commande == "D":
+        moteurs.tourner_droite
+    elif commande == "P":
+        moteurs.arreter
 
 # =========================================================================
 # BOUCLE PRINCIPALE
@@ -195,42 +234,48 @@ print("-" * 40)
 moteurs.avancer(VITESSE_NORMALE)
 
 try:
-    while True:
-        # 1. Gestion de la distance
-        distance = sonar.mesurer_distance()
-        action = eviter_obstacle(distance)
-        
-        if action == "libre":
-            moteurs.avancer(VITESSE_NORMALE)
+    if switch_mod_1.value() == 1 and switch_mod_2.value() == 0:
+        while True:
+            cmd = lire_bluetooth()
+            if cmd is not None:
+                traiter_commande_remote(cmd)
+            time.sleep_ms(50)
+    else:
+        while True:
+            # 1. Gestion de la distance
+            distance = sonar.mesurer_distance()
+            action = eviter_obstacle(distance)
             
-        # 2. Gestion périodique du BMP280 + Distance groupée (Toutes les 3 secondes)
-        maintenant = time.time()
-        if maintenant - dernier_bmp >= INTERVALLE_BMP:
-            try:
-                temperature, pression = bmp.lire_tout()
-                environnement_ok = evaluer_environnement(temperature, pression)
-                mettre_a_jour_leds(environnement_ok)
+            if action == "libre":
+                moteurs.avancer(VITESSE_NORMALE)
                 
-                statut = "OK" if environnement_ok else "ANORMAL"
+            # 2. Gestion périodique du BMP280 + Distance groupée (Toutes les 3 secondes)
+            maintenant = time.time()
+            if maintenant - dernier_bmp >= INTERVALLE_BMP:
+                try:
+                    temperature, pression = bmp.lire_tout()
+                    environnement_ok = evaluer_environnement(temperature, pression)
+                    mettre_a_jour_leds(environnement_ok)
+                    
+                    statut = "OK" if environnement_ok else "ANORMAL"
+                    
+                    # Traduction texte de la distance pour la ligne groupée
+                    txt_distance = f"{distance}cm" if distance != -1 else "Erreur capteur"
+                    
+                    # === AFFICHAGE TOUT-EN-UN ICI ===
+                    print(f"Temp: {temperature}°C | "
+                        f"Pression: {pression}hPa | "
+                        f"Environnement: {statut} | "
+                        f"Distance: {txt_distance}")
+                        
+                except Exception as e:
+                    print(f"Erreur BMP280: {e}")
+                dernier_bmp = maintenant
                 
-                # Traduction texte de la distance pour la ligne groupée
-                txt_distance = f"{distance}cm" if distance != -1 else "Erreur capteur"
-                
-                # === AFFICHAGE TOUT-EN-UN ICI ===
-                print(f"Temp: {temperature}°C | "
-                      f"Pression: {pression}hPa | "
-                      f"Environnement: {statut} | "
-                      f"Distance: {txt_distance}")
-                      
-            except Exception as e:
-                print(f"Erreur BMP280: {e}")
-            dernier_bmp = maintenant
-            
-        # 3. Affichage immédiat UNIQUEMENT en cas de danger ou d'attention
-        if distance != -1 and action != "libre":
-            print(f"[ALERTE] Distance active: {distance}cm | Action: {action}")
-            
-        time.sleep_ms(50)
+            # 3. Affichage immédiat UNIQUEMENT en cas de danger ou d'attention
+            if distance != -1 and action != "libre":
+                print(f"[ALERTE] Distance active: {distance}cm | Action: {action}")
+            time.sleep_ms(50)
 
 except KeyboardInterrupt:
     # Arrêt d'urgence propre (Ctrl+C dans Thonny)
